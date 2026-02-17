@@ -1,25 +1,24 @@
 import os
-import asyncio
 import requests
+import asyncio
 from fastapi import FastAPI, Request
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, types
+from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import ParseMode
-from aiogram.utils import executor
 
 # =============================
-# Environment
+# ENV переменные
 # =============================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-BITRIX_WEBHOOK_BASE = os.getenv("BITRIX_WEBHOOK_BASE")  # пример: https://b24-xxx/rest/1/xxxxx
-OPENLINE_ID = os.getenv("OPENLINE_ID", "1")  # ID открытой линии в Bitrix
+BITRIX_WEBHOOK_BASE = os.getenv("BITRIX_WEBHOOK_BASE")  # https://b24-xxx/rest/1/xxxxx
+OPENLINE_ID = os.getenv("OPENLINE_ID", "1")  # ID открытой линии
 BOT_ID = int(os.getenv("BOT_ID", "21"))  # ID бота в Bitrix
 
 # =============================
 # Telegram Bot setup
 # =============================
-bot = Bot(token=TELEGRAM_TOKEN)
 storage = MemoryStorage()
+bot = Bot(token=TELEGRAM_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(storage=storage)
 
 # =============================
@@ -28,13 +27,13 @@ dp = Dispatcher(storage=storage)
 app = FastAPI()
 
 # =============================
-# Простое хранилище связей
-# Telegram user_id <-> Bitrix chat_id
+# Хранилище связей
+# telegram_user_id -> bitrix_chat_id
 # =============================
-TELEGRAM_CHAT_MAP = {}  # telegram_user_id -> bitrix_chat_id
+TELEGRAM_CHAT_MAP = {}
 
 # =============================
-# Вспомогательная функция Bitrix
+# Вспомогательная функция для Bitrix
 # =============================
 def bitrix_call(method: str, data: dict):
     url = f"{BITRIX_WEBHOOK_BASE}/{method}"
@@ -43,9 +42,9 @@ def bitrix_call(method: str, data: dict):
     return r.json()
 
 # =============================
-# 1️⃣ Telegram -> эхо + Bitrix
+# 1️⃣ Telegram -> Эхо + Bitrix
 # =============================
-@dp.message_handler()
+@dp.message()
 async def telegram_echo(message: types.Message):
     user_id = message.from_user.id
     text = message.text
@@ -54,13 +53,12 @@ async def telegram_echo(message: types.Message):
     await message.answer(f"🤖 Эхо: {text}")
 
     # 2) Отправка в Bitrix Open Lines
-    # Если ещё нет chat_id — создаём новый
     if user_id not in TELEGRAM_CHAT_MAP:
         resp = bitrix_call(
             "im.openlines.chat.start",
             {
                 "LINE_ID": OPENLINE_ID,
-                "USER_ID": user_id,  # можно использовать как external id
+                "USER_ID": user_id,  # external id для связи
             },
         )
         chat_id = resp.get("result", {}).get("CHAT", {}).get("ID")
@@ -89,7 +87,7 @@ async def bitrix_webhook(request: Request):
     event = payload.get("event")
     data = payload.get("data", {})
 
-    # фильтруем только сообщения
+    # Только сообщения
     if event != "ONIMBOTMESSAGEADD":
         return {"ok": True}
 
@@ -98,9 +96,8 @@ async def bitrix_webhook(request: Request):
     text = message.get("TEXT", "")
     author_id = message.get("AUTHOR_ID")
 
-    # если сообщение от оператора — отправляем в Telegram
+    # Если от оператора → отправляем в Telegram
     if author_id and int(author_id) > 0:
-        # ищем telegram_user_id по chat_id
         telegram_user_id = None
         for t_id, c_id in TELEGRAM_CHAT_MAP.items():
             if c_id == chat_id:
@@ -114,19 +111,18 @@ async def bitrix_webhook(request: Request):
     return {"ok": True}
 
 # =============================
-# 3️⃣ FastAPI + aiogram run
+# 3️⃣ Запуск Telegram polling + FastAPI
 # =============================
-async def start():
-    # запускаем aiogram polling
-    loop = asyncio.get_event_loop()
-    from aiogram import executor as ag_executor
-
-    ag_executor.start_polling(dp, loop=loop)
+async def start_polling():
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    from aiogram import executor
+    executor.start_polling(dp)
 
 # =============================
-# Если Render запускает FastAPI напрямую
+# Render запускает FastAPI
 # =============================
 if __name__ == "__main__":
     import uvicorn
-
+    # Запуск FastAPI на Render
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
