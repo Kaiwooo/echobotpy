@@ -2,8 +2,8 @@ import os
 import asyncio
 import requests
 from fastapi import FastAPI, Request
-from aiogram import Bot, Dispatcher, types
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import ParseMode
 from aiogram.utils import executor
 
@@ -18,8 +18,9 @@ BOT_ID = int(os.getenv("BOT_ID", "21"))  # ID бота в Bitrix
 # =============================
 # Telegram Bot setup
 # =============================
-bot = Bot(token=TELEGRAM_TOKEN, parse_mode=ParseMode.HTML)
-dp = Dispatcher(bot, storage=MemoryStorage())
+bot = Bot(token=TELEGRAM_TOKEN)
+storage = MemoryStorage()
+dp = Dispatcher(storage=storage)
 
 # =============================
 # FastAPI setup
