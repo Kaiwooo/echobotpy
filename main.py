@@ -1,129 +1,89 @@
 import os
+import logging
 import requests
 from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types
+from aiogram.types import Message
 from aiogram.client.bot import DefaultBotProperties
-from aiogram.enums import ParseMode
-from aiogram.fsm.storage.memory import MemoryStorage
-import asyncio
+from aiogram.dispatcher.fsm.storage.memory import MemoryStorage
 
-# =============================
-# ENV переменные
-# =============================
+# ---------------- CONFIG ----------------
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-BITRIX_WEBHOOK_BASE = os.getenv("BITRIX_WEBHOOK_BASE")  # https://b24-xxx/rest/1/xxxxx
-OPENLINE_ID = os.getenv("OPENLINE_ID", "1")  # ID открытой линии
-BOT_ID = int(os.getenv("BOT_ID", "21"))  # ID бота в Bitrix
+BITRIX_REST_URL = os.getenv("BITRIX_REST_URL")  # пример: https://b24-xxx.bitrix24.ru/rest/1/a10zktt7n91vljxn/
+BITRIX_BOT_ID = os.getenv("BITRIX_BOT_ID")      # id бота в Bitrix Open Line
+BITRIX_LINE_ID = os.getenv("BITRIX_LINE_ID")    # id вашей открытой линии
 
-# =============================
-# Telegram Bot setup
-# =============================
-storage = MemoryStorage()
-bot = Bot(token=TELEGRAM_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-dp = Dispatcher(storage=storage)
+logging.basicConfig(level=logging.INFO)
 
-# =============================
-# FastAPI setup
-# =============================
+# ---------------- INIT ----------------
+bot = Bot(
+    token=TELEGRAM_TOKEN,
+    default=DefaultBotProperties(parse_mode="HTML")
+)
+dp = Dispatcher(storage=MemoryStorage())
 app = FastAPI()
 
-# =============================
-# Хранилище связей
-# telegram_user_id -> bitrix_chat_id
-# =============================
-TELEGRAM_CHAT_MAP = {}
-
-# =============================
-# Вспомогательная функция для Bitrix
-# =============================
-def bitrix_call(method: str, data: dict):
-    url = f"{BITRIX_WEBHOOK_BASE}/{method}"
-    r = requests.post(url, data=data, timeout=10)
-    r.raise_for_status()
-    return r.json()
-
-# =============================
-# 1️⃣ Telegram -> Эхо + Bitrix
-# =============================
-@dp.message()
-async def telegram_echo(message: types.Message):
-    user_id = message.from_user.id
-    text = message.text
-
-    # 1) Эхо в Telegram
-    await message.answer(f"🤖 Эхо: {text}")
-
-    # 2) Создаём чат в Open Line, если ещё нет
-    if user_id not in TELEGRAM_CHAT_MAP:
-        resp = bitrix_call(
-            "im.openlines.chat.start",
-            {
-                "LINE_ID": OPENLINE_ID,
-                "USER_ID": user_id,  # external id для связи
-            },
-        )
-        chat_id = resp.get("result", {}).get("CHAT", {}).get("ID")
-        if not chat_id:
-            print("Ошибка при создании chat_id в Bitrix:", resp)
-            return
-        TELEGRAM_CHAT_MAP[user_id] = chat_id
-    else:
-        chat_id = TELEGRAM_CHAT_MAP[user_id]
-
-    # 3) Отправка сообщения в Open Line
-    bitrix_call(
-        "im.message.add",
-        {
-            "CHAT_ID": chat_id,
-            "MESSAGE": text,
-        },
-    )
-
-# =============================
-# 2️⃣ FastAPI webhook для Bitrix
-# =============================
-@app.post("/bitrix/webhook")
-async def bitrix_webhook(request: Request):
-    payload = await request.json()
-    event = payload.get("event")
-    data = payload.get("data", {})
-
-    # Только сообщения
-    if event != "ONIMBOTMESSAGEADD":
-        return {"ok": True}
-
-    message = data.get("MESSAGE", {})
-    chat_id = message.get("CHAT_ID")
-    text = message.get("TEXT", "")
-    author_id = message.get("AUTHOR_ID")
-
-    # Если от оператора → отправляем в Telegram
-    if author_id and int(author_id) > 0:
-        telegram_user_id = None
-        for t_id, c_id in TELEGRAM_CHAT_MAP.items():
-            if c_id == chat_id:
-                telegram_user_id = t_id
-                break
-        if telegram_user_id:
-            await bot.send_message(telegram_user_id, f"💬 Оператор: {text}")
-        else:
-            print("Не найден telegram_user_id для chat_id", chat_id)
-
-    return {"ok": True}
-
-# =============================
-# 3️⃣ FastAPI webhook для Telegram
-# =============================
+# ---------------- TELEGRAM WEBHOOK ----------------
 @app.post("/telegram")
 async def telegram_webhook(request: Request):
-    data = await request.json()
-    update = types.Update(**data)
-    await dp.process_update(update)
-    return {"ok": True}
+    """
+    Входящие сообщения от Telegram
+    """
+    try:
+        update = types.Update(**await request.json())
+        if update.message:
+            user_id = update.message.from_user.id
+            text = update.message.text or ""
+            
+            # Эхо
+            await bot.send_message(chat_id=user_id, text=text)
 
-# =============================
-# 4️⃣ Render запускает FastAPI
-# =============================
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+            # Отправка в Bitrix Open Line
+            bitrix_payload = {
+                "BOT_ID": BITRIX_BOT_ID,
+                "LINE_ID": BITRIX_LINE_ID,
+                "MESSAGE": text,
+                "USER_ID": user_id,  # чтобы оператор мог видеть, кому писать
+            }
+            bitrix_resp = requests.post(
+                f"{BITRIX_REST_URL}imopenlines.crm.message.add.json",
+                json=bitrix_payload
+            )
+            logging.info(f"Bitrix response: {bitrix_resp.text}")
+
+        return {"ok": True}
+    except Exception as e:
+        logging.error(f"Telegram webhook error: {e}")
+        return {"ok": False, "error": str(e)}
+
+# ---------------- BITRIX WEBHOOK ----------------
+@app.post("/bitrix")
+async def bitrix_webhook(request: Request):
+    """
+    Входящие сообщения от Bitrix Open Lines (оператор → Telegram)
+    """
+    try:
+        data = await request.json()
+        logging.info(f"Incoming Bitrix message: {data}")
+
+        telegram_user_id = int(data.get("USER_ID") or data.get("CHAT_ID"))
+        text = data.get("MESSAGE")
+
+        if telegram_user_id and text:
+            await bot.send_message(chat_id=telegram_user_id, text=text)
+            return {"ok": True}
+        else:
+            return {"ok": False, "error": "Missing USER_ID or MESSAGE"}
+    except Exception as e:
+        logging.error(f"Bitrix webhook error: {e}")
+        return {"ok": False, "error": str(e)}
+
+# ---------------- STARTUP/SHUTDOWN ----------------
+@app.on_event("startup")
+async def on_startup():
+    logging.info("Bot started")
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    await bot.session.close()
+    logging.info("Bot stopped")
