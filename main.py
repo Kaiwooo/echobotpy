@@ -1,11 +1,11 @@
 import os
 import requests
-import asyncio
 from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types
-from aiogram.enums import ParseMode
 from aiogram.client.bot import DefaultBotProperties
+from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+import asyncio
 
 # =============================
 # ENV переменные
@@ -19,10 +19,7 @@ BOT_ID = int(os.getenv("BOT_ID", "21"))  # ID бота в Bitrix
 # Telegram Bot setup
 # =============================
 storage = MemoryStorage()
-bot = Bot(
-    token=TELEGRAM_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-)
+bot = Bot(token=TELEGRAM_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=storage)
 
 # =============================
@@ -56,7 +53,7 @@ async def telegram_echo(message: types.Message):
     # 1) Эхо в Telegram
     await message.answer(f"🤖 Эхо: {text}")
 
-    # 2) Отправка в Bitrix Open Lines
+    # 2) Создаём чат в Open Line, если ещё нет
     if user_id not in TELEGRAM_CHAT_MAP:
         resp = bitrix_call(
             "im.openlines.chat.start",
@@ -115,18 +112,18 @@ async def bitrix_webhook(request: Request):
     return {"ok": True}
 
 # =============================
-# 3️⃣ Запуск Telegram polling + FastAPI
+# 3️⃣ FastAPI webhook для Telegram
 # =============================
-async def start_polling():
-    import logging
-    logging.basicConfig(level=logging.INFO)
-    from aiogram import executor
-    executor.start_polling(dp)
+@app.post("/telegram")
+async def telegram_webhook(request: Request):
+    data = await request.json()
+    update = types.Update(**data)
+    await dp.process_update(update)
+    return {"ok": True}
 
 # =============================
-# Render запускает FastAPI
+# 4️⃣ Render запускает FastAPI
 # =============================
 if __name__ == "__main__":
     import uvicorn
-    # Запуск FastAPI на Render
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
