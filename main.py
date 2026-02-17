@@ -22,6 +22,7 @@ storage = MemoryStorage()
 bot = Bot(
     token=TELEGRAM_TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
 dp = Dispatcher(storage=storage)
 
 # =============================
