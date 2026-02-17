@@ -7,9 +7,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.session.aiohttp import AiohttpSession
 
 # --- Настройки ---
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")  # токен вашего Telegram-бота
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")  # токен Telegram-бота
 BITRIX_REST_URL = os.getenv("BITRIX_REST_URL")  # https://b24-.../rest/1/.../
-BITRIX_BOT_ID = int(os.getenv("BITRIX_BOT_ID", 0))  # ID бота в Bitrix
 BITRIX_LINE_ID = int(os.getenv("BITRIX_LINE_ID", 1))  # ID открытой линии
 
 logging.basicConfig(level=logging.INFO)
@@ -22,18 +21,49 @@ dp = Dispatcher(storage=storage)
 # --- FastAPI приложение ---
 app = FastAPI()
 
+# --- Хранилище SESSION_ID для пользователей ---
+USER_SESSIONS = {}  # user_id -> session_id
+
 # --- Функция для отправки сообщения в Bitrix Open Line ---
 def send_to_bitrix(user_id: str, message: str):
-    if not BITRIX_REST_URL or not BITRIX_BOT_ID:
-        logging.warning("BITRIX_REST_URL или BITRIX_BOT_ID не настроены")
+    """
+    1. Если сессия для пользователя есть, отправляем сообщение через bot.session.message.send
+    2. Иначе создаём сессию через message.session.start, сохраняем SESSION_ID и отправляем
+    """
+    if not BITRIX_REST_URL:
+        logging.warning("BITRIX_REST_URL не настроен")
         return
-    data = {
-        "BOT_ID": BITRIX_BOT_ID,
-        "LINE_ID": BITRIX_LINE_ID,
-        "MESSAGE": f"{message} (из Telegram @{user_id})"
-    }
+
+    session_id = USER_SESSIONS.get(user_id)
+
+    if not session_id:
+        # Создаём новую сессию
+        data = {
+            "LINE_ID": BITRIX_LINE_ID,
+            "EXTERNAL_USER_ID": user_id,
+            "MESSAGE": message
+        }
+        try:
+            resp = requests.post(f"{BITRIX_REST_URL}/imopenlines.message.session.start.json", json=data)
+            resp_json = resp.json()
+            logging.info(f"Создание сессии: {resp.status_code} {resp.text}")
+            if "result" in resp_json and "SESSION_ID" in resp_json["result"]:
+                session_id = resp_json["result"]["SESSION_ID"]
+                USER_SESSIONS[user_id] = session_id
+            else:
+                logging.warning(f"Не удалось получить SESSION_ID для {user_id}")
+                return
+        except Exception as e:
+            logging.exception("Ошибка при создании сессии Bitrix")
+            return
+
+    # Отправка сообщения через bot.session.message.send
     try:
-        resp = requests.post(f"{BITRIX_REST_URL}/imopenlines.message.add", json=data)
+        send_data = {
+            "SESSION_ID": session_id,
+            "MESSAGE": message
+        }
+        resp = requests.post(f"{BITRIX_REST_URL}/imopenlines.bot.session.message.send.json", json=send_data)
         logging.info(f"Отправка в Bitrix: {resp.status_code} {resp.text}")
     except Exception as e:
         logging.exception("Ошибка при отправке сообщения в Bitrix")
@@ -65,16 +95,15 @@ async def bitrix_webhook(request: Request):
     """
     data = await request.json()
     try:
-        # проверяем, что это сообщение оператора
-        msg = data.get("data", {}).get("PARAMS", {}).get("MESSAGE", "")
-        user_id = data.get("data", {}).get("PARAMS", {}).get("USER_ID")
-        telegram_username = data.get("data", {}).get("PARAMS", {}).get("UF_TELEGRAM")  # опционально
-        if msg and user_id:
-            # отправка в Telegram
+        # проверяем сообщение от оператора
+        params = data.get("data", {}).get("PARAMS", {})
+        msg = params.get("MESSAGE")
+        external_user_id = params.get("EXTERNAL_USER_ID")  # user_id Telegram
+        if msg and external_user_id:
             try:
-                await bot.send_message(chat_id=user_id, text=msg)
+                await bot.send_message(chat_id=external_user_id, text=msg)
             except Exception as e:
-                logging.exception(f"Ошибка отправки в Telegram {user_id}")
+                logging.exception(f"Ошибка отправки в Telegram {external_user_id}")
     except Exception as e:
         logging.exception("Ошибка обработки webhook Bitrix")
     return {"ok": True}
