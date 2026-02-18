@@ -1,29 +1,25 @@
 import logging
 from fastapi import Request
 from telegram.bot import bot
+from storage import get_telegram_chat
 
 log = logging.getLogger(__name__)
 
-
 async def handle_bitrix_webhook(request: Request):
-    """
-    Webhook от Bitrix для нового сообщения в открытой линии
-    """
-    data = await request.json()
-    log.info("Bitrix connector webhook: %s", data)
+    payload = await request.json()
+    log.info("Bitrix webhook: %s", payload)
 
-    event = data.get("event")
-    params = data.get("data", {}).get("PARAMS", {})
+    data = payload.get("data", {}).get("PARAMS", {})
+    external_id = data.get("USER_ID") or data.get("ID")
+    message = data.get("MESSAGE")
 
-    if event == "ONIMCONNECTORRECEIVE" and params.get("MESSAGE"):
-        user_id = params.get("USER_ID")  # Bitrix user ID
-        message = params.get("MESSAGE")
-        telegram_chat_id = params.get("UF_TELEGRAM")  # связанный Telegram chat_id
+    if not external_id or not message:
+        return {"ok": True}
 
-        if telegram_chat_id:
-            try:
-                await bot.send_message(chat_id=telegram_chat_id, text=message)
-            except Exception:
-                log.exception("Ошибка отправки в Telegram")
+    telegram_chat_id = get_telegram_chat(external_id)
+    if telegram_chat_id:
+        await bot.send_message(telegram_chat_id, message)
+    else:
+        log.warning("Нет связанного Telegram чата для %s", external_id)
 
     return {"ok": True}

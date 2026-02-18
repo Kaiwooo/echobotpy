@@ -1,18 +1,20 @@
+import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.fsm.storage.memory import MemoryStorage
-from bitrix.connector import send_message
+from bitrix.api import send_message, register_user
 from config import TELEGRAM_TOKEN
 
-storage = MemoryStorage()
+logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TELEGRAM_TOKEN)
-dp = Dispatcher(storage=storage)
-
-CONNECTOR_ID = "your_connector_id"  # ID твоего Connector API в Bitrix
+dp = Dispatcher(storage=MemoryStorage())
 
 @dp.message()
-async def echo_and_forward(message: types.Message):
-    # 1. Эхо в Telegram
+async def echo_and_send_to_bitrix(message: types.Message):
+    # эхо в Telegram
     await message.answer(message.text)
-    # 2. Отправка в Bitrix через Connector API
-    user_id = f"telegram_{message.from_user.id}"
-    send_message(CONNECTOR_ID, user_id, message.text)
+
+    # формируем external_id для Connector API
+    external_id = register_user(message.from_user.id, message.from_user.username or "unknown")
+
+    # отправляем в Bitrix
+    send_message(external_id, message.text)
