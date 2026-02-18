@@ -1,0 +1,5 @@
+import os
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+BITRIX_REST_URL = os.getenv("BITRIX_REST_URL")
+BITRIX_LINE_ID = os.getenv("BITRIX_LINE_ID")
