@@ -1,25 +1,20 @@
 from fastapi import FastAPI, Request
-from telegram.bot import dp, bot
-from bitrix.webhook import handle_bitrix_webhook
+from aiogram import Bot, Dispatcher
 from aiogram.types import Update
-import logging
 
-logging.basicConfig(level=logging.INFO)
+from config import TELEGRAM_TOKEN
+from telegram.bot import router
+
 app = FastAPI()
 
-# Telegram webhook
+bot = Bot(token=TELEGRAM_TOKEN)
+dp = Dispatcher()
+dp.include_router(router)
+
+
 @app.post("/telegram")
 async def telegram_webhook(request: Request):
     data = await request.json()
-    update = Update(**data)
+    update = Update.model_validate(data)
     await dp.feed_update(bot, update)
     return {"ok": True}
-
-# Bitrix webhook
-@app.post("/bitrix")
-async def bitrix_webhook(request: Request):
-    return await handle_bitrix_webhook(request)
-
-@app.on_event("startup")
-async def startup_event():
-    logging.info("Приложение стартовало")

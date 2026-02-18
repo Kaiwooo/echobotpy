@@ -6,8 +6,7 @@ from bitrix.api import BitrixAPI
 router = Router()
 bitrix = BitrixAPI()
 
-# ⚠️ один раз положи реальные токены
-# (обычно читаются из БД или env после первичной OAuth-авторизации)
+# ⚠️ временно: токены должны храниться в БД / env
 bitrix.set_tokens(
     access_token="ACCESS_TOKEN",
     refresh_token="REFRESH_TOKEN",
