@@ -1,20 +1,39 @@
 import logging
-from aiogram import Bot, Dispatcher, types
-from aiogram.fsm.storage.memory import MemoryStorage
-from bitrix.api import send_message, register_user
-from config import TELEGRAM_TOKEN
 
-logging.basicConfig(level=logging.INFO)
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import CommandStart
+
+from config import TELEGRAM_TOKEN
+from bitrix.api import bitrix_connector
+
+log = logging.getLogger(__name__)
+
 bot = Bot(token=TELEGRAM_TOKEN)
-dp = Dispatcher(storage=MemoryStorage())
+dp = Dispatcher()
+
+
+@dp.message(CommandStart())
+async def start(message: types.Message):
+    await message.answer("Привет! Напиши сообщение — я передам его оператору 👋")
+
 
 @dp.message()
-async def echo_and_send_to_bitrix(message: types.Message):
-    # эхо в Telegram
-    await message.answer(message.text)
+async def handle_message(message: types.Message):
+    """
+    1. Отвечаем эхо в Telegram
+    2. Отправляем сообщение в Bitrix Open Lines через Connector API
+    """
+    text = message.text or ""
 
-    # формируем external_id для Connector API
-    external_id = register_user(message.from_user.id, message.from_user.username or "unknown")
+    # Эхо пользователю
+    await message.answer(text)
 
-    # отправляем в Bitrix
-    send_message(external_id, message.text)
+    # Отправка в Bitrix
+    ok = bitrix_connector.send_message(
+        external_user_id=str(message.from_user.id),
+        text=text,
+        user_name=message.from_user.full_name,
+    )
+
+    if not ok:
+        log.warning("Не удалось отправить сообщение в Bitrix")
