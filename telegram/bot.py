@@ -1,39 +1,35 @@
-import logging
-
-from aiogram import Bot, Dispatcher, types
+from aiogram import Router, types
 from aiogram.filters import CommandStart
 
-from config import TELEGRAM_TOKEN
-from bitrix.api import bitrix_connector
+from bitrix.api import BitrixAPI
 
-log = logging.getLogger(__name__)
+router = Router()
+bitrix = BitrixAPI()
 
-bot = Bot(token=TELEGRAM_TOKEN)
-dp = Dispatcher()
+# ⚠️ один раз положи реальные токены
+# (обычно читаются из БД или env после первичной OAuth-авторизации)
+bitrix.set_tokens(
+    access_token="ACCESS_TOKEN",
+    refresh_token="REFRESH_TOKEN",
+    expires_in=3600,
+)
 
 
-@dp.message(CommandStart())
+@router.message(CommandStart())
 async def start(message: types.Message):
-    await message.answer("Привет! Напиши сообщение — я передам его оператору 👋")
+    await message.answer("Привет! Напишите сообщение — оператор ответит 👋")
 
 
-@dp.message()
+@router.message()
 async def handle_message(message: types.Message):
-    """
-    1. Отвечаем эхо в Telegram
-    2. Отправляем сообщение в Bitrix Open Lines через Connector API
-    """
-    text = message.text or ""
+    if not message.text:
+        return
 
-    # Эхо пользователю
-    await message.answer(text)
+    dialog_id = f"telegram_{message.from_user.id}"
 
-    # Отправка в Bitrix
-    ok = bitrix_connector.send_message(
-        external_user_id=str(message.from_user.id),
-        text=text,
-        user_name=message.from_user.full_name,
+    bitrix.send_message(
+        dialog_id=dialog_id,
+        text=message.text,
     )
 
-    if not ok:
-        log.warning("Не удалось отправить сообщение в Bitrix")
+    await message.answer("Сообщение отправлено оператору ✅")
