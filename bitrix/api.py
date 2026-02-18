@@ -1,27 +1,43 @@
-import httpx
-from config import BITRIX_REST_URL, BITRIX_CONNECTOR_ID
+import logging
+import requests
 
-class BitrixAPIError(Exception):
-    pass
+logger = logging.getLogger("bitrix.api")
+logger.setLevel(logging.INFO)
 
 class BitrixAPI:
     def __init__(self):
-        self.rest_url = BITRIX_REST_URL
-        self.connector_id = BITRIX_CONNECTOR_ID
+        # Параметры после установки приложения будут сюда сохраняться
+        self.client_endpoint = None
+        self.access_token = None
+        self.refresh_token = None
+
+    def set_auth(self, auth: dict):
+        """
+        Сохраняем auth из ONAPPINSTALL
+        """
+        self.access_token = auth.get("access_token")
+        self.refresh_token = auth.get("refresh_token")
+        self.client_endpoint = auth.get("client_endpoint")
+
+        logger.info(f"Bitrix auth received: {auth}")
 
     def send_message(self, dialog_id: str, text: str):
-        if not self.connector_id:
-            raise BitrixAPIError("BITRIX_CONNECTOR_ID not set")
+        """
+        Отправляем сообщение в Open Lines
+        """
+        if not self.client_endpoint or not self.access_token:
+            raise Exception("Bitrix auth not set")
 
-        url = f"{self.rest_url}imconnector.message.add.json"
+        url = f"{self.client_endpoint}rest/imopenlines.message.add.json"
         payload = {
+            "auth": self.access_token,
             "DIALOG_ID": dialog_id,
-            "CONNECTOR_ID": self.connector_id,
             "MESSAGE": text
         }
-
-        r = httpx.post(url, data=payload)
+        r = requests.post(url, json=payload)
         if r.status_code != 200:
-            raise BitrixAPIError(f"Bitrix API error {r.status_code}: {r.text}")
-
+            logger.error(f"Bitrix API error {r.status_code}: {r.text}")
+            raise Exception(f"Bitrix API error {r.status_code}: {r.text}")
         return r.json()
+
+bitrix_connector = BitrixAPI()

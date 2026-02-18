@@ -1,17 +1,39 @@
+import logging
 from fastapi import FastAPI, Request
-from aiogram import Bot, Dispatcher
-from aiogram.types import Update
-from telegram.bot import router
-from config import TELEGRAM_TOKEN
+from telegram.bot import dp, bot
+from bitrix.api import bitrix_connector
+import asyncio
+
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI()
-bot = Bot(token=TELEGRAM_TOKEN)
-dp = Dispatcher()
-dp.include_router(router)
+
+@app.post("/bitrix/webhook")
+async def bitrix_webhook(request: Request):
+    """
+    Вебхук, который получает ONAPPINSTALL от Bitrix
+    """
+    data = await request.json()
+    logger = logging.getLogger("bitrix.webhook")
+    logger.info(f"Bitrix webhook received: {data}")
+
+    if "auth" in data:
+        bitrix_connector.set_auth(data["auth"])
+    return {"status": "ok"}
+
 
 @app.post("/telegram")
 async def telegram_webhook(request: Request):
-    data = await request.json()
-    update = Update.model_validate(data)
+    """
+    Вебхук для Telegram
+    """
+    update = await request.json()
     await dp.feed_update(bot, update)
-    return {"ok": True}
+    return {"status": "ok"}
+
+
+@app.on_event("startup")
+async def startup_event():
+    # В FastAPI можно запускать бота через polling, если нет вебхука
+    # asyncio.create_task(dp.start_polling(bot))  # если нужен polling
+    logging.info("Server started")

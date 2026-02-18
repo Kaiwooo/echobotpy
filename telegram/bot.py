@@ -1,23 +1,27 @@
-from aiogram import Router, types
-from aiogram.filters import CommandStart
-from bitrix.api import BitrixAPI, BitrixAPIError
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import Message
+from aiogram.filters import Text
+from bitrix.api import bitrix_connector
+import logging
 
-router = Router()
-bitrix = BitrixAPI()
+logging.basicConfig(level=logging.INFO)
 
-@router.message(CommandStart())
-async def start(message: types.Message):
-    await message.answer("Привет! Напишите сообщение — оператор ответит 👋")
+# Ваш Telegram токен
+TELEGRAM_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
 
-@router.message()
-async def handle_message(message: types.Message):
-    if not message.text:
-        return
+bot = Bot(token=TELEGRAM_TOKEN)
+dp = Dispatcher()
 
-    # dialog_id в Bitrix = telegram_<chat_id>
-    dialog_id = f"telegram_{message.from_user.id}"
+@dp.message()
+async def handle_message(message: Message):
+    """
+    Пересылаем сообщение в Bitrix Open Line
+    """
+    text = message.text
+    dialog_id = f"telegram_{message.from_user.id}"  # Привязка к пользователю Telegram
+
     try:
-        bitrix.send_message(dialog_id=dialog_id, text=message.text)
-        await message.answer("Сообщение отправлено оператору ✅")
-    except BitrixAPIError as e:
+        response = bitrix_connector.send_message(dialog_id, text)
+        await message.answer(f"Сообщение отправлено в Bitrix: {response}")
+    except Exception as e:
         await message.answer(f"Ошибка при отправке: {e}")
